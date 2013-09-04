@@ -24,7 +24,7 @@ namespace Spacerunner2
         }
     }
 
-    class Form1 : Form // khyip: 71.193.98.79
+    class Form1 : Form
     {
         private static Form1 _fetch;
 
