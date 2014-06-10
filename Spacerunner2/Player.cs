@@ -24,13 +24,13 @@ namespace Spacerunner2
             TurnRight = 4
         }
 
-        public static bool FzooMode = false;
+        public static bool FzooMode;
+        public static bool DestressMode;
 
         private const float AccelSpeed = 60f;
         private const float RotSpeed = 3f;
         private const float Theta = 2.5f;
         private const float ShipSize = 8;
-        private readonly IPEndPoint _owner;
         private readonly Pen _thrustPen = new Pen(Color.Red, 0);
         private readonly Pen _pen;
         private readonly Brush _brush;
@@ -46,7 +46,7 @@ namespace Spacerunner2
 
         public Player()
         {
-            _owner = null;
+            Owner = null;
             _pen = new Pen(Ext.ColorFromHsv(120, 0.75, 0.75));
             _brush = new SolidBrush(_pen.Color);
             _field = EntitiesOfType<Field>().Single();
@@ -55,7 +55,7 @@ namespace Spacerunner2
 
         private Player(IPEndPoint owner)
         {
-            _owner = owner;
+            Owner = owner;
             _pen = new Pen(Ext.ColorFromHsv((double)owner.GetHashCode() * 360 / int.MaxValue, 0.5, 0.5));
             _brush = new SolidBrush(_pen.Color);
             _field = EntitiesOfType<Field>().Single();
@@ -64,89 +64,157 @@ namespace Spacerunner2
 
         protected override void Tick(NetCon netCon, Graphics graphics, Rectangle camera)
         {
-            var now = DateTime.UtcNow;
-            if (_owner == null)
+            if (Owner == null)
             {
-                _bulletCharge = Math.Min(_bulletCharge + 1, 100);
-                _playerState = PlayerState.None;
-                if (Keyboard.IsKeyDown(Keys.A))
-                    _playerState |= PlayerState.TurnLeft;
-                if (Keyboard.IsKeyDown(Keys.D))
-                    _playerState |= PlayerState.TurnRight;
-                if (Keyboard.IsKeyDown(Keys.W))
-                    _playerState |= PlayerState.Thrusting;
-                if (Keyboard.IsKeyDown(Keys.S) && _bulletCharge > 30 && (now - _lastShot).TotalSeconds > 0.2f)
-                {
-                    if (!FzooMode)
-                        _bulletCharge -= 30;
-                    var forwards = new Vector2((float)Math.Cos(_rotation), (float)Math.Sin(_rotation));
-                    new Bullet(_position + forwards * ShipSize, _velocity + 100 * forwards, 3).Spawn();
-                    _lastShot = now;
-                }
-
-                if ((now - _lastNetwork).TotalSeconds > 0.2)
-                {
-                    _lastNetwork = now;
-                    netCon.SendOthers(Rpc.Create(UpdatePlayerFromNet, _position.X, _position.Y, _velocity.X, _velocity.Y, _rotation, (int)_playerState, now.Ticks, _score));
-                }
-
-                World.CameraCenter.X += (_position.X + _velocity.X * World.DeltaSeconds * 30 - World.CameraCenter.X) / 20;
-                World.CameraCenter.Y += (_position.Y + _velocity.Y * World.DeltaSeconds * 30 - World.CameraCenter.Y) / 20;
-
-                if (!FzooMode && CollisionDetection())
-                    Respawn();
-
-                graphics.DrawRectangle(Bullet.Pen, 10, 10, _bulletCharge, 10);
-
-                var i = 0;
-                foreach (var otherPlayer in EntitiesOfType<Player>())
-                    graphics.DrawString((otherPlayer._owner == null ? "Self" : otherPlayer._owner.ToString()) + " score:" + otherPlayer._score, Form1.GlobalFont, otherPlayer._brush, 10, ++i * 10 + 10);
-
-                List<Powerup> collected = null;
-                foreach (var powerup in EntitiesOfType<Powerup>())
-                {
-                    var dist = (powerup.Position - _position).MagnitudeSquared;
-                    if (dist < Powerup.Radius * Powerup.Radius)
-                    {
-                        switch (powerup.Type)
-                        {
-                            case Powerup.PowerupType.Points:
-                                _score += 2;
-                                break;
-                            default:
-                                throw new ArgumentOutOfRangeException();
-                        }
-                        if (collected == null)
-                            collected = new List<Powerup>();
-                        collected.Add(powerup);
-                    }
-                }
-                if (collected != null)
-                    foreach (var powerup in collected)
-                        powerup.Collect(netCon);
-
-                var deadBullet = EntitiesOfType<Bullet>().FirstOrDefault(bullet => bullet.Owner != null && (bullet.Position - _position).MagnitudeSquared < ShipSize * ShipSize);
-
-                if (deadBullet != null)
-                {
-                    netCon.Send(deadBullet.Owner, Rpc.Create(AddScore, 5));
-                    deadBullet.NetworkDie(netCon);
-                    Respawn();
-                }
+                UpdateBulletCharge();
+                DoKeybindings();
+                CheckUpdatePlayer(netCon);
+                CheckCollisionDetection();
+                DrawSelfUi(graphics);
+                UpdateCamera();
+                CollectPowerups(netCon);
+                CheckDeathByBullet(netCon);
             }
             else
             {
-                if ((now - _lastNetwork).TotalSeconds > 5)
-                    Die();
+                CheckForTimeout();
             }
 
+            ApplyTurnAndThrust();
+            BounceOffWalls();
+            DrawPlayer(graphics, camera);
+            ApplyPositionVelocity();
+        }
+
+        private void CheckForTimeout()
+        {
+            var now = DateTime.UtcNow;
+            if ((now - _lastNetwork).TotalSeconds > 5)
+                Die();
+        }
+
+        private void UpdateBulletCharge()
+        {
+            _bulletCharge = Math.Min(_bulletCharge + 1, 100);
+        }
+
+        private void DoKeybindings()
+        {
+            var now = DateTime.UtcNow;
+            _playerState = PlayerState.None;
+            if (Keyboard.IsKeyDown(Keys.A))
+                _playerState |= PlayerState.TurnLeft;
+            if (Keyboard.IsKeyDown(Keys.D))
+                _playerState |= PlayerState.TurnRight;
+            if (Keyboard.IsKeyDown(Keys.W))
+                _playerState |= PlayerState.Thrusting;
+            if (Keyboard.IsKeyDown(Keys.S) && _bulletCharge > 30 && (now - _lastShot).TotalSeconds > 0.2f)
+            {
+                if (!FzooMode)
+                    _bulletCharge -= 30;
+                var forwards = new Vector2((float)Math.Cos(_rotation), (float)Math.Sin(_rotation));
+                new Bullet(_position + forwards * ShipSize, _velocity + 100 * forwards, 3).Spawn(null);
+                _lastShot = now;
+            }
+        }
+
+        private void CheckUpdatePlayer(NetCon netCon)
+        {
+            var now = DateTime.UtcNow;
+            if ((now - _lastNetwork).TotalSeconds > 0.1)
+            {
+                _lastNetwork = now;
+                netCon.SendOthers(Rpc.Create(UpdatePlayerFromNet, _position.X, _position.Y, _velocity.X, _velocity.Y, _rotation, (int)_playerState, _score));
+            }
+        }
+
+        private void UpdateCamera()
+        {
+            World.CameraCenter.X += (_position.X + _velocity.X * World.DeltaSeconds * 30 - World.CameraCenter.X) / 20;
+            World.CameraCenter.Y += (_position.Y + _velocity.Y * World.DeltaSeconds * 30 - World.CameraCenter.Y) / 20;
+        }
+
+        private void CheckCollisionDetection()
+        {
+            if (!FzooMode && CollisionDetection())
+            {
+                if (DestressMode)
+                    BounceOffAsteroids();
+                else
+                    Respawn();
+            }
+        }
+
+        private void BounceOffAsteroids()
+        {
+            if (_velocity.MagnitudeSquared < 0.01f)
+                _velocity = new Vector2(-1, 0);
+            _velocity = _velocity.Normalized * 10;
+            do
+            {
+                _position -= _velocity;
+            } while (CollisionDetection() && _position.X > 0);
+            _velocity = new Vector2(0, 0);
+            if (_position.X < 0)
+                Respawn();
+        }
+
+        private void DrawSelfUi(Graphics graphics)
+        {
+            graphics.DrawRectangle(Bullet.Pen, 10, 10, _bulletCharge, 10);
+
+            var i = 0;
+            foreach (var otherPlayer in EntitiesOfType<Player>())
+                graphics.DrawString((otherPlayer.Owner == null ? "Self" : otherPlayer.Owner.ToString()) + " score:" + otherPlayer._score, Form1.GlobalFont, otherPlayer._brush, 10, ++i * 10 + 10);
+        }
+
+        private void CollectPowerups(NetCon netCon)
+        {
+            List<Powerup> collected = null;
+            foreach (var powerup in EntitiesOfType<Powerup>().Where(powerup => (powerup.Position - _position).MagnitudeSquared < Powerup.Radius * Powerup.Radius))
+            {
+                switch (powerup.Type)
+                {
+                    case Powerup.PowerupType.Points:
+                        _score += 2;
+                        break;
+                    default:
+                        Form1.Output("Internal error: Unknown powerup type " + powerup.Type);
+                        break;
+                }
+                if (collected == null)
+                    collected = new List<Powerup>();
+                collected.Add(powerup);
+            }
+            if (collected != null)
+                foreach (var powerup in collected)
+                    powerup.Collect(netCon);
+        }
+
+        private void CheckDeathByBullet(NetCon netCon)
+        {
+            var deadBullet = EntitiesOfType<Bullet>().FirstOrDefault(bullet => bullet.Owner != null && (bullet.Position - _position).MagnitudeSquared < ShipSize * ShipSize);
+
+            if (deadBullet != null)
+            {
+                netCon.Send(deadBullet.Owner, Rpc.Create(AddScore, 5));
+                deadBullet.NetworkDie(netCon);
+                Respawn();
+            }
+        }
+
+        private void ApplyTurnAndThrust()
+        {
             if (_playerState.HasFlag(PlayerState.TurnLeft))
                 _rotation -= RotSpeed * World.DeltaSeconds;
             if (_playerState.HasFlag(PlayerState.TurnRight))
                 _rotation += RotSpeed * World.DeltaSeconds;
             if (_playerState.HasFlag(PlayerState.Thrusting))
-                _velocity += new Vector2((float)Math.Cos(_rotation), (float)Math.Sin(_rotation)) * (FzooMode && _owner == null ? AccelSpeed * 10 : AccelSpeed) * World.DeltaSeconds;
+                _velocity += new Vector2((float)Math.Cos(_rotation), (float)Math.Sin(_rotation)) * (FzooMode && Owner == null ? AccelSpeed * 10 : AccelSpeed) * World.DeltaSeconds;
+        }
 
+        private void BounceOffWalls()
+        {
             if (_position.X < 0)
                 _velocity = new Vector2(Math.Abs(_velocity.X), _velocity.Y);
             if (_position.X > _field.BoardSize)
@@ -155,22 +223,28 @@ namespace Spacerunner2
                 _velocity = new Vector2(_velocity.X, Math.Abs(_velocity.Y));
             if (_position.Y > _field.BoardSize)
                 _velocity = new Vector2(_velocity.X, -Math.Abs(_velocity.Y));
+        }
 
+        private void DrawPlayer(Graphics graphics, Rectangle camera)
+        {
             graphics.DrawPolygon(_pen, GetPlayerPoints(camera.X, camera.Y));
             if (_playerState.HasFlag(PlayerState.Thrusting))
             {
                 graphics.DrawPolygon(_thrustPen, GetFlamePoints(camera.X, camera.Y));
                 var backwards = new Vector2((float)Math.Cos(_rotation - Math.PI), (float)Math.Sin(_rotation - Math.PI));
-                new Smoke(_field, _position + backwards * ShipSize, _velocity + 50 * backwards).Spawn();
+                new Smoke(_field, _position + backwards * ShipSize, _velocity + 50 * backwards).Spawn(Owner);
             }
+        }
 
+        private void ApplyPositionVelocity()
+        {
             _velocity *= 0.9999f;
             _position += _velocity * World.DeltaSeconds;
         }
 
         private static void AddScore(NetCon netCon, IPEndPoint sender, int incrementBy)
         {
-            var player = EntitiesOfType<Player>().FirstOrDefault(p => p._owner == null);
+            var player = EntitiesOfType<Player>().FirstOrDefault(p => p.Owner == null);
             if (player != null)
                 player._score += incrementBy;
         }
@@ -206,17 +280,16 @@ namespace Spacerunner2
             return new[] { center.Add(front), center.Add(left), center.Add(right) };
         }
 
-        private static void UpdatePlayerFromNet(NetCon netCon, IPEndPoint sender, float posX, float posY, float velX, float velY, float rotation, int state, long ticks, int score)
+        private static void UpdatePlayerFromNet(NetCon netCon, IPEndPoint sender, float posX, float posY, float velX, float velY, float rotation, int state, int score)
         {
-            var packetTransferTime = (float)(DateTime.UtcNow - new DateTime(ticks, DateTimeKind.Utc)).TotalSeconds;
-            var player = EntitiesOfType<Player>().FirstOrDefault(p => sender.Equals(p._owner));
+            var player = EntitiesOfType<Player>().FirstOrDefault(p => sender.Equals(p.Owner));
             if (player == null)
             {
                 player = new Player(sender);
-                player.Spawn();
+                player.Spawn(sender);
             }
             player._velocity = new Vector2(velX, velY);
-            player._position = new Vector2(posX, posY) + player._velocity * packetTransferTime;
+            player._position = new Vector2(posX, posY);
             player._rotation = rotation;
             player._playerState = (PlayerState)state;
             player._lastNetwork = DateTime.UtcNow;

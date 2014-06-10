@@ -10,7 +10,6 @@ namespace Spacerunner2
         public static readonly Pen Pen = new Pen(Color.Orange);
         private static int _bulletIdCounter;
         private readonly int _bulletId;
-        private readonly IPEndPoint _owner;
         private readonly Field _field;
         private readonly float _width;
         private Vector2 _position;
@@ -19,7 +18,7 @@ namespace Spacerunner2
 
         public Bullet(Vector2 position, Vector2 velocity, float width)
         {
-            _owner = null;
+            Owner = null;
             _bulletId = _bulletIdCounter++;
             _field = EntitiesOfType<Field>().Single();
             _position = position;
@@ -29,7 +28,7 @@ namespace Spacerunner2
 
         private Bullet(IPEndPoint owner, Vector2 position, Vector2 velocity, float width, int bulletId)
         {
-            _owner = owner;
+            Owner = owner;
             _bulletId = bulletId;
             _field = EntitiesOfType<Field>().Single();
             _position = position;
@@ -44,8 +43,6 @@ namespace Spacerunner2
             get { return 1; }
         }
 
-        public IPEndPoint Owner { get { return _owner; } }
-
         protected override void Tick(NetCon netCon, Graphics graphics, Rectangle camera)
         {
             _position += _velocity * World.DeltaSeconds;
@@ -53,7 +50,7 @@ namespace Spacerunner2
             if (_field.IsOnGrid(_position) == false || _field[(int)_position.X, (int)_position.Y])
                 Die();
             var now = DateTime.UtcNow;
-            if (_owner == null)
+            if (Owner == null)
             {
                 if ((now - _lastNetwork).TotalSeconds > 1)
                     netCon.SendOthers(Rpc.Create(UpdateFromNetwork, _position.X, _position.Y, _velocity.X, _velocity.Y, _width, _bulletId));
@@ -67,14 +64,14 @@ namespace Spacerunner2
 
         public void NetworkDie(NetCon netCon)
         {
-            netCon.SendOthersGuaranteed(Rpc.Create(DeathFromNetwork, _owner, _bulletId));
+            netCon.SendOthers(Rpc.Create(DeathFromNetwork, Owner, _bulletId));
             Die();
         }
 
         private static void DeathFromNetwork(NetCon netCon, IPEndPoint sender, IPEndPoint owner, int bulletId)
         {
             var realOwner = owner ?? sender;
-            var bullet = EntitiesOfType<Bullet>().FirstOrDefault(p => realOwner.Equals(p._owner) && p._bulletId == bulletId);
+            var bullet = EntitiesOfType<Bullet>().FirstOrDefault(p => realOwner.Equals(p.Owner) && p._bulletId == bulletId);
             if (bullet != null)
                 bullet.Die();
         }
@@ -83,11 +80,11 @@ namespace Spacerunner2
         {
             var pos = new Vector2(posX, posY);
             var vel = new Vector2(velX, velY);
-            var bullet = EntitiesOfType<Bullet>().FirstOrDefault(p => sender.Equals(p._owner) && p._bulletId == bulletId);
+            var bullet = EntitiesOfType<Bullet>().FirstOrDefault(p => sender.Equals(p.Owner) && p._bulletId == bulletId);
             if (bullet == null)
             {
                 bullet = new Bullet(sender, pos, vel, width, bulletId);
-                bullet.Spawn();
+                bullet.Spawn(sender);
             }
             else
             {

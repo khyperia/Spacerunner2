@@ -53,14 +53,10 @@ namespace Spacerunner2
 
             ThreadPool.QueueUserWorkItem(o =>
                                          {
-                                             new Field().Spawn();
-                                             new Player().Spawn();
-                                             new Powerup(Powerup.PowerupType.Points).Spawn();
-
-                                             _netCon = new NetCon(DefaultPort);
-                                             StartTimer(5000, (b, a) => Network.Probe(_netCon));
-                                             StartTimer(2000, (b, a) => GuaranteedPacket.SendEnsurePacket(_netCon));
-
+                                             new Field().Spawn(null);
+                                             new Player().Spawn(null);
+                                             new Powerup(Powerup.PowerupType.Points).Spawn(null);
+                                             _netCon = new NetCon();
                                              Output("Ready to play, press T to open input, /help for help");
                                          });
             Output("Generating field");
@@ -165,13 +161,20 @@ namespace Spacerunner2
                         }
                         IPEndPoint address;
                         if (command.Length != 2 || Ext.TryParseIpEndPoint(command[1], DefaultPort, out address) == false)
-                            Output("Syntax: /connect [ip] [optional port]");
+                            Output("Syntax: /connect [ip]:[optional port]");
                         else
-                            Network.AddOrUpdate(_netCon, address);
+                            _netCon = new NetCon(address);
+                        break;
+                    case "host":
+                        _netCon = new NetCon(DefaultPort);
                         break;
                     case "fzoo":
                         Player.FzooMode = !Player.FzooMode;
                         Output(Player.FzooMode ? "Fzoo <3" : "Fzoo </3");
+                        break;
+                    case "yay":
+                        Player.DestressMode = !Player.DestressMode;
+                        Output(Player.DestressMode ? "Destress mode, have fun!" : "Be careful out there!");
                         break;
                     case "help":
                         Output("A/D to rotate, W to thrust, S to shoot");
@@ -181,7 +184,7 @@ namespace Spacerunner2
                 }
             }
             else if (_netCon != null)
-                _netCon.SendOthersGuaranteed(Rpc.Create(MessageGet, input));
+                _netCon.SendOthers(Rpc.Create(MessageGet, input));
         }
 
         private static void MessageGet(NetCon netCon, IPEndPoint endPoint, string message)

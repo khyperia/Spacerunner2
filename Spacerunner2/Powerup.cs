@@ -23,14 +23,13 @@ namespace Spacerunner2
         private static int _powerupIdCounter;
 
         private readonly int _powerupId;
-        private readonly IPEndPoint _owner;
         private readonly PowerupType _type;
         private Vector2 _location;
         private DateTime _lastNetwork;
 
         public Powerup(PowerupType type)
         {
-            _owner = null;
+            Owner = null;
             _powerupId = _powerupIdCounter++;
             _type = type;
             _location = EntitiesOfType<Field>().Single().FindRespawnPoint(-0.7f);
@@ -38,7 +37,7 @@ namespace Spacerunner2
 
         private Powerup(IPEndPoint owner, int powerupId, PowerupType type, Vector2 location)
         {
-            _owner = owner;
+            Owner = owner;
             _powerupId = powerupId;
             _type = type;
             _location = location;
@@ -64,7 +63,7 @@ namespace Spacerunner2
         protected override void Tick(NetCon netCon, Graphics graphics, Rectangle camera)
         {
             var now = DateTime.UtcNow;
-            if (_owner == null && (now - _lastNetwork).TotalSeconds > 5)
+            if (Owner == null && (now - _lastNetwork).TotalSeconds > 5)
             {
                 _lastNetwork = now;
                 netCon.SendOthers(Rpc.Create(UpdateLocation, _powerupId, (int)_type, _location.X, _location.Y));
@@ -74,18 +73,18 @@ namespace Spacerunner2
 
         public void Collect(NetCon netCon)
         {
-            if (_owner == null)
+            if (Owner == null)
                 Respawn(netCon);
             else
             {
-                netCon.Send(_owner, Rpc.Create(Respawn, _powerupId));
+                netCon.Send(Owner, Rpc.Create(Respawn, _powerupId));
                 Die();
             }
         }
 
         private static void Respawn(NetCon netCon, IPEndPoint sender, int powerupId)
         {
-            var powerup = EntitiesOfType<Powerup>().FirstOrDefault(p => p._owner == null && p._powerupId == powerupId);
+            var powerup = EntitiesOfType<Powerup>().FirstOrDefault(p => p.Owner == null && p._powerupId == powerupId);
             if (powerup != null)
                 powerup.Respawn(netCon);
         }
@@ -93,16 +92,16 @@ namespace Spacerunner2
         private void Respawn(NetCon netCon)
         {
             _location = EntitiesOfType<Field>().Single().FindRespawnPoint(-0.7f);
-            netCon.SendOthersGuaranteed(Rpc.Create(UpdateLocation, _powerupId, (int)_type, _location.X, _location.Y));
+            netCon.SendOthers(Rpc.Create(UpdateLocation, _powerupId, (int)_type, _location.X, _location.Y));
         }
 
         private static void UpdateLocation(NetCon netCon, IPEndPoint sender, int powerupId, int type, float x, float y)
         {
-            var powerup = EntitiesOfType<Powerup>().FirstOrDefault(p => sender.Equals(p._owner) && p._powerupId == powerupId);
+            var powerup = EntitiesOfType<Powerup>().FirstOrDefault(p => sender.Equals(p.Owner) && p._powerupId == powerupId);
             if (powerup == null)
             {
                 powerup = new Powerup(sender, powerupId, (PowerupType)type, new Vector2(x, y));
-                powerup.Spawn();
+                powerup.Spawn(sender);
             }
             else
                 powerup._location = new Vector2(x, y);

@@ -6,6 +6,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Reflection;
+using System.Threading;
 
 namespace Spacerunner2
 {
@@ -100,92 +101,11 @@ namespace Spacerunner2
         }
     }
 
-    class NetCon
+    static class Serializer
     {
-        private const int SIO_UDP_CONNRESET = -1744830452;
         private static readonly Module Module = Assembly.GetExecutingAssembly().GetLoadedModules().Single();
-        private readonly UdpClient _udpClient;
-        private readonly byte[] _sendBuffer = new byte[512];
-        private readonly BinaryWriter _sendBufferWriter;
 
-        public NetCon(int port)
-        {
-            _sendBufferWriter = new BinaryWriter(new MemoryStream(_sendBuffer));
-            for (var bindTry = 0; bindTry < 100; bindTry++)
-            {
-                try
-                {
-                    _udpClient = new UdpClient(port);
-                    break;
-                }
-                catch
-                {
-                    Form1.Output("Couldn't bind to port " + port + ", cycling to next port");
-                    port++;
-                }
-            }
-            if (_udpClient == null)
-            {
-                Form1.Output("Could not bind to any port, network will not function");
-            }
-            else
-            {
-                if (Ext.IsMono == false)
-                    HackAroundNetExceptions();
-                _udpClient.BeginReceive(ReceiveCallback, null);
-                Form1.Output("Opened stream on port " + port);
-            }
-        }
-
-        private void HackAroundNetExceptions()
-        {
-            _udpClient.Client.IOControl((IOControlCode)SIO_UDP_CONNRESET, new byte[] { 0, 0, 0, 0 }, null); // http://stackoverflow.com/questions/5199026
-        }
-
-        private void ReceiveCallback(IAsyncResult result)
-        {
-            IPEndPoint remoteEp = null;
-            byte[] bytes = null;
-            try
-            {
-                bytes = _udpClient.EndReceive(result, ref remoteEp);
-            }
-            catch (Exception e)
-            {
-                Form1.Output("Exception on read - " + e.GetType().Name + ": " + e.Message);
-            }
-
-            if (bytes != null)
-            {
-                try
-                {
-                    var reader = new BinaryReader(new MemoryStream(bytes));
-                    ProcessPacket(remoteEp, reader);
-                }
-                catch (Exception e)
-                {
-                    Form1.Output("Exception on packet process - " + e.GetType().Name + ": " + e.Message);
-                }
-            }
-
-            try
-            {
-                _udpClient.BeginReceive(ReceiveCallback, null);
-            }
-            catch (Exception e)
-            {
-                Form1.Output("FATAL (network will no longer function): Exception on read - " + e.GetType().Name + ": " + e.Message);
-            }
-        }
-
-        private void ProcessPacket(IPEndPoint sender, BinaryReader reader)
-        {
-            var rpc = ReadRpc(reader);
-            rpc.Invoke(this, sender);
-            Network.AddOrUpdate(this, sender);
-        }
-
-        private static object InvokeReader(BinaryReader reader, Type type)
+        public static object InvokeReader(BinaryReader reader, Type type)
         {
             if (!type.IsArray)
                 return ReaderMethods[type](reader);
@@ -198,25 +118,7 @@ namespace Spacerunner2
             return retval;
         }
 
-        public void Send(IPEndPoint destination, Rpc rpc)
-        {
-            lock (_sendBuffer)
-            {
-                _sendBufferWriter.Seek(0, SeekOrigin.Begin);
-                WriteRpc(_sendBufferWriter, rpc);
-                try
-                {
-                    _udpClient.Send(_sendBuffer, (int)_sendBufferWriter.BaseStream.Position, destination);
-                }
-                catch (Exception e)
-                {
-                    Form1.Output("Exception on write - " + e.GetType().Name + ": " + e.Message);
-                    Network.KillConnection(destination);
-                }
-            }
-        }
-
-        private static void InvokeWriter(BinaryWriter writer, Type type, object value)
+        public static void InvokeWriter(BinaryWriter writer, Type type, object value)
         {
             if (type.IsArray)
             {
@@ -295,24 +197,149 @@ namespace Spacerunner2
             writer.Write((ushort)address.Port);
         }
 
-        private static Rpc ReadRpc(BinaryReader reader)
+        public static Rpc ReadRpc(BinaryReader reader)
         {
             var method = Module.ResolveMethod(reader.ReadInt32());
             var parameters = method.GetParameters();
             var args = new object[parameters.Length - 2];
             for (var i = 2; i < parameters.Length; i++)
                 args[i - 2] = InvokeReader(reader, parameters[i].ParameterType);
-            if (reader.BaseStream.Position != reader.BaseStream.Length)
-                throw new Exception("Invalid RPC packet length");
             return Rpc.UnsafeCreate(method, args);
         }
 
-        private static void WriteRpc(BinaryWriter writer, Rpc rpc)
+        public static void WriteRpc(BinaryWriter writer, Rpc rpc)
         {
             writer.Write(rpc.Method.MetadataToken);
             var parameters = rpc.Method.GetParameters();
             for (var i = 2; i < parameters.Length; i++)
                 InvokeWriter(writer, parameters[i].ParameterType, rpc.Arguments[i - 2]);
+        }
+    }
+
+    class NetCon
+    {
+        private readonly List<TcpClient> _connections;
+        private readonly byte[] _sendBuffer = new byte[512];
+        private readonly BinaryWriter _sendBufferWriter;
+
+        public NetCon()
+        {
+            _connections = new List<TcpClient>();
+            _sendBufferWriter = new BinaryWriter(new MemoryStream(_sendBuffer));
+        }
+
+        public NetCon(int port)
+            : this()
+        {
+            TcpListener host;
+            while (true)
+            {
+                try
+                {
+                    host = new TcpListener(IPAddress.Any, port);
+                    break;
+                }
+                catch
+                {
+                    Form1.Output("Couldn't bind to port " + port + ", cycling to next port");
+                    port++;
+                }
+            }
+            host.Start();
+            host.BeginAcceptTcpClient(AcceptCallback, host);
+            Form1.Output("Opened server on port " + port);
+        }
+
+        public NetCon(IPEndPoint endPoint)
+            : this()
+        {
+            var client = new TcpClient();
+            client.Connect(endPoint);
+            _connections.Add(client);
+            new Thread(ListenTcpClient) { IsBackground = true }.Start(client);
+            Form1.Output("Connected to " + endPoint);
+        }
+
+        private void AcceptCallback(IAsyncResult result)
+        {
+            var host = (TcpListener)result.AsyncState;
+            var client = host.EndAcceptTcpClient(result);
+            _connections.Add(client);
+            new Thread(ListenTcpClient) { IsBackground = true }.Start(client);
+            host.BeginAcceptTcpClient(AcceptCallback, host);
+        }
+
+        private void ListenTcpClient(object clientObject)
+        {
+            var client = (TcpClient)clientObject;
+            var reader = new BinaryReader(client.GetStream());
+            var endpoint = (IPEndPoint)client.Client.RemoteEndPoint;
+            while (client.Connected)
+            {
+                try
+                {
+                    var rpc = Serializer.ReadRpc(reader);
+                    rpc.Invoke(this, (IPEndPoint)client.Client.RemoteEndPoint);
+                }
+                catch (Exception e)
+                {
+                    Form1.Output(string.Format("{0}> {1}: {2}", endpoint, e.GetType().Name, e.Message));
+                }
+            }
+            _connections.Remove(client);
+            Form1.Fetch.Invoke((Action)(() => Entity.RemoveObjectsByOwner(endpoint)));
+            Form1.Output(string.Format("Disconnected {0}", client));
+        }
+
+        public void Send(IPEndPoint destination, Rpc rpc)
+        {
+            lock (_connections)
+            {
+                _sendBufferWriter.Seek(0, SeekOrigin.Begin);
+                Serializer.WriteRpc(_sendBufferWriter, rpc);
+                _connections.RemoveAll(t => !t.Connected);
+                foreach (var connection in _connections)
+                {
+                    if (destination.Equals(connection.Client.RemoteEndPoint))
+                    {
+                        connection.Client.Send(_sendBuffer, (int)_sendBufferWriter.BaseStream.Position, SocketFlags.None);
+                        return;
+                    }
+                }
+                if (_connections.Count == 1)
+                    Send((IPEndPoint)_connections[0].Client.RemoteEndPoint, Rpc.Create(ServerSend, destination, rpc));
+                else if (_connections.Count != 0)
+                    Form1.Output("Warning: Not connected to destination " + destination);
+            }
+        }
+
+        private static void ServerSend(NetCon net, IPEndPoint sender, IPEndPoint destination, Rpc packet)
+        {
+            net.Send(destination, Rpc.Create(ClientFromServer, sender, packet));
+        }
+
+        private static void ClientFromServer(NetCon net, IPEndPoint server, IPEndPoint sender, Rpc packet)
+        {
+            packet.Invoke(net, sender);
+        }
+
+        public void SendOthers(Rpc packet)
+        {
+            var rpc = Rpc.Create(SendOthersGet, (IPEndPoint)null, packet);
+            foreach (var connection in _connections)
+                Send((IPEndPoint)connection.Client.RemoteEndPoint, rpc);
+        }
+
+        private static void SendOthersGet(NetCon net, IPEndPoint immediateSender, IPEndPoint originalSender, Rpc packet)
+        {
+            packet.Invoke(net, originalSender ?? immediateSender);
+            var rpc = Rpc.Create(SendOthersGet, (IPEndPoint)null, packet);
+            foreach (var connection in net._connections)
+            {
+                var rep = (IPEndPoint)connection.Client.RemoteEndPoint;
+                if (!rep.Equals(immediateSender))
+                    net.Send(rep, rpc);
+            }
         }
     }
 }

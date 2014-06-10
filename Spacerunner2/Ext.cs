@@ -7,8 +7,6 @@ namespace Spacerunner2
 {
     static class Ext
     {
-        public static readonly bool IsMono = Type.GetType("Mono.Runtime") != null;
-
         public static readonly Random Rand = new Random();
 
         public static Vector2 Center(this Rectangle rect)
@@ -155,5 +153,10 @@ namespace Spacerunner2
 
         public Vector2 Normalized
         { get { return this / Magnitude; } }
+
+        public static float Dot(Vector2 left, Vector2 right)
+        {
+            return left.X * right.X + left.Y * right.Y;
+        }
     }
 }

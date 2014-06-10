@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
+using System.Net;
 
 namespace Spacerunner2
 {
@@ -19,7 +20,7 @@ namespace Spacerunner2
         public static void Tick()
         {
             var now = DateTime.UtcNow;
-            DeltaSeconds = (float) (now - _lastTick).TotalSeconds;
+            DeltaSeconds = (float)(now - _lastTick).TotalSeconds;
             _lastTick = now;
         }
     }
@@ -28,6 +29,7 @@ namespace Spacerunner2
     {
         private static readonly List<Entity> Entities = new List<Entity>();
         private static Entity[] _entityCloneArray = new Entity[10];
+        public IPEndPoint Owner;
 
         private static Entity[] GetEntityCloneArray()
         {
@@ -37,8 +39,14 @@ namespace Spacerunner2
             return _entityCloneArray;
         }
 
-        public void Spawn()
+        public static void RemoveObjectsByOwner(IPEndPoint owner)
         {
+            Entities.RemoveAll(e => Equals(owner, e.Owner));
+        }
+
+        public void Spawn(IPEndPoint owner)
+        {
+            Owner = owner;
             for (var i = 0; i < Entities.Count; i++)
             {
                 if (Entities[i].DrawOrder < DrawOrder)
