@@ -17,7 +17,7 @@ namespace Spacerunner2
             _velocity = velocity;
         }
 
-        protected override void Tick(NetCon netCon, Graphics graphics, Rectangle camera)
+        protected override void Tick(Graphics graphics, Rectangle camera)
         {
             _position += _velocity * World.DeltaSeconds;
             var width = (_frame++ + 10) / 10.0f;

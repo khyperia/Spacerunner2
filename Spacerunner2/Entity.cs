@@ -2,7 +2,6 @@
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
-using System.Net;
 
 namespace Spacerunner2
 {
@@ -29,7 +28,6 @@ namespace Spacerunner2
     {
         private static readonly List<Entity> Entities = new List<Entity>();
         private static Entity[] _entityCloneArray = new Entity[10];
-        public IPEndPoint Owner;
 
         private static Entity[] GetEntityCloneArray()
         {
@@ -39,14 +37,8 @@ namespace Spacerunner2
             return _entityCloneArray;
         }
 
-        public static void RemoveObjectsByOwner(IPEndPoint owner)
+        public void Spawn()
         {
-            Entities.RemoveAll(e => Equals(owner, e.Owner));
-        }
-
-        public void Spawn(IPEndPoint owner)
-        {
-            Owner = owner;
             for (var i = 0; i < Entities.Count; i++)
             {
                 if (Entities[i].DrawOrder < DrawOrder)
@@ -68,16 +60,16 @@ namespace Spacerunner2
             return Entities.OfType<T>();
         }
 
-        public static void TickAll(NetCon netCon, Graphics graphics, Size screenSize)
+        public static void TickAll(Graphics graphics, Size screenSize)
         {
             var camera = World.CameraRectangle(screenSize);
             var arr = GetEntityCloneArray();
             var count = Entities.Count;
             for (var i = 0; i < count; i++)
-                arr[i].Tick(netCon, graphics, camera);
+                arr[i].Tick(graphics, camera);
         }
 
         protected abstract int DrawOrder { get; }
-        protected abstract void Tick(NetCon netCon, Graphics graphics, Rectangle camera);
+        protected abstract void Tick(Graphics graphics, Rectangle camera);
     }
 }

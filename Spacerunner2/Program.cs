@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
-using System.Net;
 using System.Threading;
 using System.Windows.Forms;
 using Timer = System.Windows.Forms.Timer;
@@ -33,13 +32,12 @@ namespace Spacerunner2
 
         private readonly Dictionary<Keys, bool> _keyStates = new Dictionary<Keys, bool>();
         private static readonly Color BackgroundColor = Color.FromArgb(10, 10, 20);
-        private NetCon _netCon;
         private static readonly List<Tuple<string, DateTime>> OutputBuffer = new List<Tuple<string, DateTime>>();
         private readonly Pen _inputBufferPen = new Pen(Color.DeepPink);
         private readonly Brush _inputBufferBrush = new SolidBrush(Color.DeepPink);
         private string _inputBuffer;
         private bool _inputOpen;
-        private const int DefaultPort = 34567;
+        private bool _ready = false;
 
         public Form1()
         {
@@ -53,11 +51,11 @@ namespace Spacerunner2
 
             ThreadPool.QueueUserWorkItem(o =>
                                          {
-                                             new Field().Spawn(null);
-                                             new Player().Spawn(null);
-                                             new Powerup(Powerup.PowerupType.Points).Spawn(null);
-                                             _netCon = new NetCon();
-                                             Output("Ready to play, press T to open input, /help for help");
+                                             new Field().Spawn();
+                                             new Player().Spawn();
+                                             new Powerup(Powerup.PowerupType.Points).Spawn();
+                                             Output("Ready to play, press T to open input, \"help\" for help");
+                                             _ready = true;
                                          });
             Output("Generating field");
         }
@@ -75,8 +73,8 @@ namespace Spacerunner2
             var graphics = e.Graphics;
             graphics.Clear(BackgroundColor);
             var csize = ClientSize;
-            if (_netCon != null)
-                Entity.TickAll(_netCon, graphics, csize);
+            if (_ready)
+                Entity.TickAll(graphics, csize);
             if (_inputOpen)
                 graphics.DrawRectangle(_inputBufferPen, 5, csize.Height - 20, csize.Width - 10, 15);
             OutputBuffer.RemoveAll(o => (DateTime.UtcNow - o.Item2).TotalSeconds > 20);
@@ -148,48 +146,18 @@ namespace Spacerunner2
 
         private void DoInput(string input)
         {
-            if (input.StartsWith("/"))
+            var command = input.Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
+            switch (command[0])
             {
-                var command = input.Substring(1).Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
-                switch (command[0])
-                {
-                    case "connect":
-                        if (_netCon == null)
-                        {
-                            Output("Field not created; wait for map to generate first");
-                            break;
-                        }
-                        IPEndPoint address;
-                        if (command.Length != 2 || Ext.TryParseIpEndPoint(command[1], DefaultPort, out address) == false)
-                            Output("Syntax: /connect [ip]:[optional port]");
-                        else
-                            _netCon = new NetCon(address);
-                        break;
-                    case "host":
-                        _netCon = new NetCon(DefaultPort);
-                        break;
-                    case "fzoo":
-                        Player.FzooMode = !Player.FzooMode;
-                        Output(Player.FzooMode ? "Fzoo <3" : "Fzoo </3");
-                        break;
-                    case "yay":
-                        Player.DestressMode = !Player.DestressMode;
-                        Output(Player.DestressMode ? "Destress mode, have fun!" : "Be careful out there!");
-                        break;
-                    case "help":
-                        Output("A/D to rotate, W to thrust, S to shoot");
-                        Output("Don't hit the white stuff, you'll die (and respawn)");
-                        Output("To connect to multiplayer, /connect [ip address]");
-                        break;
-                }
+                case "fzoo":
+                    Player.FzooMode = !Player.FzooMode;
+                    Output(Player.FzooMode ? "Fzoo <3" : "Fzoo </3");
+                    break;
+                case "help":
+                    Output("A/D to rotate, W to thrust, S to shoot");
+                    Output("Don't hit the white stuff, you'll die (and respawn)");
+                    break;
             }
-            else if (_netCon != null)
-                _netCon.SendOthers(Rpc.Create(MessageGet, input));
-        }
-
-        private static void MessageGet(NetCon netCon, IPEndPoint endPoint, string message)
-        {
-            Output("<" + endPoint.Address + "> " + message);
         }
     }
 }

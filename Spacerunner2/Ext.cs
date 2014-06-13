@@ -121,6 +121,11 @@ namespace Spacerunner2
             return new Vector2(left._x / right, left._y / right);
         }
 
+        public static Vector2 operator -(Vector2 left)
+        {
+            return new Vector2(-left._x, -left._y);
+        }
+
         public static Vector2 Lerp(Vector2 left, Vector2 right, float value)
         {
             return (1 - value) * left + value * right;
@@ -157,6 +162,11 @@ namespace Spacerunner2
         public static float Dot(Vector2 left, Vector2 right)
         {
             return left.X * right.X + left.Y * right.Y;
+        }
+
+        public static Vector2 RandDir(Random rand)
+        {
+            return FromTheta((float)(Math.PI * 2 * rand.NextDouble()));
         }
     }
 }

@@ -47,7 +47,6 @@
     <Compile Include="Entity.cs" />
     <Compile Include="Ext.cs" />
     <Compile Include="Field.cs" />
-    <Compile Include="NetCon.cs" />
     <Compile Include="Noise.cs" />
     <Compile Include="Player.cs" />
     <Compile Include="Powerup.cs" />

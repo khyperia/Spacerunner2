@@ -1,8 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
-using System.Net;
 
 namespace Spacerunner2
 {
@@ -20,27 +18,13 @@ namespace Spacerunner2
                                                                         {PowerupType.Points, new Pen(Color.BlueViolet)}
                                                                     };
 
-        private static int _powerupIdCounter;
-
-        private readonly int _powerupId;
         private readonly PowerupType _type;
         private Vector2 _location;
-        private DateTime _lastNetwork;
 
         public Powerup(PowerupType type)
         {
-            Owner = null;
-            _powerupId = _powerupIdCounter++;
             _type = type;
             _location = EntitiesOfType<Field>().Single().FindRespawnPoint(-0.7f);
-        }
-
-        private Powerup(IPEndPoint owner, int powerupId, PowerupType type, Vector2 location)
-        {
-            Owner = owner;
-            _powerupId = powerupId;
-            _type = type;
-            _location = location;
         }
 
         public PowerupType Type
@@ -53,58 +37,26 @@ namespace Spacerunner2
             get { return _location; }
         }
 
-        public Pen Pen { get { return Pens[_type]; }}
+        public Pen Pen { get { return Pens[_type]; } }
 
         protected override int DrawOrder
         {
             get { return 0; }
         }
 
-        protected override void Tick(NetCon netCon, Graphics graphics, Rectangle camera)
+        protected override void Tick(Graphics graphics, Rectangle camera)
         {
-            var now = DateTime.UtcNow;
-            if (Owner == null && (now - _lastNetwork).TotalSeconds > 5)
-            {
-                _lastNetwork = now;
-                netCon.SendOthers(Rpc.Create(UpdateLocation, _powerupId, (int)_type, _location.X, _location.Y));
-            }
             graphics.DrawEllipse(Pens[_type], _location.X - Radius - camera.X, _location.Y - Radius - camera.Y, Radius * 2, Radius * 2);
         }
 
-        public void Collect(NetCon netCon)
+        public void Collect()
         {
-            if (Owner == null)
-                Respawn(netCon);
-            else
-            {
-                netCon.Send(Owner, Rpc.Create(Respawn, _powerupId));
-                Die();
-            }
+            Respawn();
         }
 
-        private static void Respawn(NetCon netCon, IPEndPoint sender, int powerupId)
+        private void Respawn()
         {
-            var powerup = EntitiesOfType<Powerup>().FirstOrDefault(p => p.Owner == null && p._powerupId == powerupId);
-            if (powerup != null)
-                powerup.Respawn(netCon);
-        }
-
-        private void Respawn(NetCon netCon)
-        {
-            _location = EntitiesOfType<Field>().Single().FindRespawnPoint(-0.7f);
-            netCon.SendOthers(Rpc.Create(UpdateLocation, _powerupId, (int)_type, _location.X, _location.Y));
-        }
-
-        private static void UpdateLocation(NetCon netCon, IPEndPoint sender, int powerupId, int type, float x, float y)
-        {
-            var powerup = EntitiesOfType<Powerup>().FirstOrDefault(p => sender.Equals(p.Owner) && p._powerupId == powerupId);
-            if (powerup == null)
-            {
-                powerup = new Powerup(sender, powerupId, (PowerupType)type, new Vector2(x, y));
-                powerup.Spawn(sender);
-            }
-            else
-                powerup._location = new Vector2(x, y);
+            _location = EntitiesOfType<Field>().Single().FindRespawnPoint(-0.8f);
         }
     }
 }

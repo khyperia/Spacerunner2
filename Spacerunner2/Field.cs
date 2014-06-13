@@ -33,6 +33,11 @@ namespace Spacerunner2
             }
         }
 
+        public bool this[Vector2 vec]
+        {
+            get { return this[(int)vec.X, (int)vec.Y]; }
+        }
+
         private float[,] GenerateBoard()
         {
             var noise = new SimplexNoise(_seed);
@@ -54,6 +59,25 @@ namespace Spacerunner2
                 position = new Vector2((float)(Ext.Rand.NextDouble() * _boardSize), (float)(Ext.Rand.NextDouble() * _boardSize));
             } while (_board[(int)position.X, (int)position.Y] > threshHold);
             return position;
+        }
+
+        public float Value(int x, int y)
+        {
+            return x >= 0 && x < _boardSize && y >= 0 && y < _boardSize ? _board[x, y] : 0.0f;
+        }
+
+        public float Value(Vector2 vec)
+        {
+            return Value((int)vec.X, (int)vec.Y);
+        }
+
+        public Vector2 Normal(Vector2 position)
+        {
+            var x = (int)position.X;
+            var y = (int)position.Y;
+            var pos = Value(x, y);
+            var vec = new Vector2(pos - Value(x + 1, y), pos - Value(x, y + 1));
+            return vec.X <= 0 && vec.Y <= 0 ? vec : vec.Normalized;
         }
 
         private Bitmap GenerateBoardBrush()
@@ -79,7 +103,7 @@ namespace Spacerunner2
             get { return 2; }
         }
 
-        protected override void Tick(NetCon netCon, Graphics graphics, Rectangle camera)
+        protected override void Tick(Graphics graphics, Rectangle camera)
         {
             graphics.DrawImageUnscaled(_boardBitmap, -camera.X, -camera.Y);
 
